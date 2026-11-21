@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SCS External Princess Mood Checker 👑</title>
+<meta name="description" content="A very girly mood tracker for the SCS External Princess.">
+<meta name="theme-color" content="#ff5fa8" id="themeColor">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tina's Moods">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+</head>
+<body data-theme="pink">
+<div class="floaties" id="floaties" aria-hidden="true"></div>
+
+<div class="loading" id="loading"><div class="crown">👑</div><div>loading your royal diary…</div></div>
+
+<!-- LOGIN (shown only when Supabase is configured and nobody is signed in) -->
+<div class="auth" id="auth" hidden>
+  <form class="authcard" id="authForm" novalidate>
+    <div class="crown">👑</div>
+    <h1 class="authtitle" id="authTitle">Welcome back</h1>
+    <p class="authsub" id="authSub">log in to your royal diary</p>
+    <label class="lbl" for="aEmail">Email</label>
+    <input type="email" id="aEmail" autocomplete="email" inputmode="email" autocapitalize="none" placeholder="tina@email.com" required>
+    <div id="aPassWrap">
+      <label class="lbl" for="aPass" style="margin-top:12px">Password</label>
+      <input type="password" id="aPass" autocomplete="current-password" minlength="6" placeholder="••••••••">
+    </div>
+    <div class="authmsg" id="authMsg" role="status" aria-live="polite"></div>
+    <button class="btn big" type="submit" id="authBtn">Log in 💖</button>
+    <button class="btn alt" type="button" id="guestBtn" hidden style="width:100%;margin-top:10px">📴 Continue offline (no login needed)</button>
+    <p class="authnote">🔒 You'll stay signed in on this phone, even offline.</p>
+    <div class="authlinks">
+      <button type="button" class="link" id="lnkSwitch">Create an account</button>
+      <button type="button" class="link" id="lnkForgot">Forgot password?</button>
+    </div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="themes" title="Pick your royal palette">
+        <small>palette</small>
+        <button class="dot" data-t="pink" aria-label="Pink palette" style="background:linear-gradient(135deg,#ff7cbc,#c98bff)"></button>
+        <button class="dot" data-t="lavender" aria-label="Lavender palette" style="background:linear-gradient(135deg,#b48aff,#8fc0ff)"></button>
+        <button class="dot" data-t="peach" aria-label="Peach palette" style="background:linear-gradient(135deg,#ffb07a,#ff6fa0)"></button>
+        <button class="dot" data-t="mint" aria-label="Mint palette" style="background:linear-gradient(135deg,#6fe3c0,#7aa8ff)"></button>
+      </div>
+      <button class="pill sync ok" id="syncChip" hidden aria-live="polite">☁️ Synced</button>
+      <button class="pill" id="logout" hidden aria-label="Log out">🚪<span class="lbl"> Log out</span></button>
+    </div>
+
+    <div class="banner" id="localBanner" hidden>💾 Local mode — no Supabase keys found, so moods are saved on this device only.</div>
+
+    <header>
+      <div class="crown">👑</div>
+      <h1>SCS External Princess<br>Mood Checker</h1>
+      <div class="sub">~ how's tinaaaaa feeling today? ~</div>
+    </header>
+
+    <nav id="nav" aria-label="Sections">
+      <button data-tab="checkin" class="on"><span class="i">💖</span><span class="l">Check-in</span></button>
+      <button data-tab="dash"><span class="i">📊</span><span class="l">Dashboard</span></button>
+      <button data-tab="diary"><span class="i">📖</span><span class="l">Diary</span></button>
+      <button data-tab="report"><span class="i">👑</span><span class="l">Reports</span></button>
+    </nav>
+
+    <!-- CHECK-IN -->
+    <section class="tab on" id="tab-checkin">
+      <div class="greeting" id="greeting">hello, tinaaa ✨</div>
+      <div class="quote" id="qotd"></div>
+
+      <div class="grid2">
+        <div>
+          <div class="card">
+            <h2>🌈 How are you feeling?</h2>
+            <p class="hint">tap the mood that matches your vibe right now</p>
+            <div class="moods" id="moods"></div>
+            <div class="moodmsg" id="moodmsg">Pick a mood, bebs 💕</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h2>🎚️ Royal Meters</h2>
+            <p class="hint">slide to match your levels</p>
+            <div class="slider"><div class="top"><label for="energy">⚡ Energy</label><span class="val" id="v-energy">6</span></div><input type="range" id="energy" min="0" max="10" value="6"><div class="ends"><span>🪫 drained</span><span>🔋 fully charged</span></div></div>
+            <div class="slider"><div class="top"><label for="stress">😵‍💫 Stress</label><span class="val" id="v-stress">4</span></div><input type="range" id="stress" min="0" max="10" value="4"><div class="ends"><span>🧘‍♀️ zen</span><span>🌋 volcano</span></div></div>
+            <div class="slider"><div class="top"><label for="social">🦋 Social Battery</label><span class="val" id="v-social">6</span></div><input type="range" id="social" min="0" max="10" value="6"><div class="ends"><span>🛌 hermit mode</span><span>🎤 main character</span></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>🎀 What's affecting your mood?</h2>
+          <p class="hint">pick all that apply</p>
+          <div class="chips" id="tags"></div>
+        </div>
+        <div class="card">
+          <h2>🧴 Princess self-care check</h2>
+          <p class="hint">what did you do for yourself today?</p>
+          <div class="chips" id="care"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📔 Dear Diary…</h2>
+        <p class="hint">spill the tea (optional)</p>
+        <label class="lbl" for="when">🕒 When was this?</label>
+        <input type="datetime-local" id="when" style="margin-bottom:12px">
+        <textarea id="note" maxlength="400" placeholder="Today was… 💭"></textarea>
+        <div class="count"><span id="nc">0</span>/400</div>
+      </div>
+
+      <div class="savebar"><button class="btn big" id="save">✨ Save My Royal Mood ✨</button></div>
+    </section>
+
+    <!-- DASHBOARD -->
+    <section class="tab" id="tab-dash">
+      <div class="card" style="padding:14px 18px">
+        <div class="row" style="align-items:center">
+          <div><strong style="color:var(--pink-d)">📅 Show stats for:</strong></div>
+          <select id="range"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="all">All time</option></select>
+        </div>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="grid2">
+        <div class="card gauge" id="gaugeCard"></div>
+        <div class="card"><h2>🔮 Royal Insights</h2><p class="hint">what the stars (and data) say</p><div id="insights"></div></div>
+      </div>
+      <div class="card"><h2>📈 Vibe Trend</h2><p class="hint">average royal vibe score, last 14 days</p><div id="trend"></div></div>
+      <div class="grid2">
+        <div class="card"><h2>💗 Mood Mix</h2><p class="hint">how often each mood showed up</p><div class="bars" id="mix"></div></div>
+        <div class="card"><h2>🗓️ Best Days of the Week</h2><p class="hint">average vibe by weekday</p><div id="weekday"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h2>🌸 Mood Calendar</h2><p class="hint">last 5 weeks, latest mood per day</p><div class="cal" id="cal"></div></div>
+        <div class="card"><h2>🧖‍♀️ Self-care Scoreboard</h2><p class="hint">how often each ritual happened</p><div class="bars" id="carebars"></div></div>
+      </div>
+    </section>
+
+    <!-- DIARY -->
+    <section class="tab" id="tab-diary">
+      <div class="card">
+        <h2>📖 The Royal Diary</h2>
+        <p class="hint">every mood, every day</p>
+        <div class="row">
+          <div><select id="fMood" aria-label="Filter by mood"><option value="">All moods 💞</option></select></div>
+          <div><input type="search" id="fText" placeholder="🔍 search notes or factors…" aria-label="Search diary"></div>
+        </div>
+      </div>
+      <div id="diaryList"></div>
+      <div class="btnrow" style="justify-content:center"><button class="btn alt small" id="moreDiary" hidden>Show older entries ⬇️</button></div>
+    </section>
+
+    <!-- REPORTS -->
+    <section class="tab" id="tab-report">
+      <div class="card">
+        <h2>👑 Royal Report Center</h2>
+        <p class="hint">download a pretty report for the council</p>
+        <label class="lbl" for="rRange">Report period</label>
+        <select id="rRange"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="all">All time</option></select>
+        <div class="btnrow stack" style="margin-top:14px">
+          <button class="btn" id="dlHtml">⬇️ Download Report (.html)</button>
+          <button class="btn alt" id="shareBtn" hidden>📤 Share report</button>
+          <button class="btn alt" id="dlCsv">📄 Download CSV</button>
+          <button class="btn alt" id="dlPrint">🖨️ Print / Save as PDF</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>👀 Report preview</h2>
+        <iframe class="preview" id="preview" title="Report preview"></iframe>
+      </div>
+      <div class="card">
+        <h2>🧰 Royal Tools</h2>
+        <p class="hint">backup & housekeeping</p>
+        <div class="btnrow">
+          <button class="btn alt small" id="sample">🎀 Load sample data</button>
+          <button class="btn alt small" id="unsample">🧽 Remove sample data</button>
+          <button class="btn alt small" id="dlJson">💾 Backup (.json)</button>
+          <button class="btn alt small" id="impBtn">📥 Restore backup</button>
+          <input type="file" id="impFile" accept=".json,application/json" hidden>
+          <button class="btn alt small" id="clear">🗑️ Clear everything</button>
+        </div>
+        <div class="btnrow" style="margin-top:12px"><button class="btn small" id="installBtn" hidden>📲 Install app on this phone</button></div>
+        <p class="hint" id="iosHint" hidden style="margin:10px 0 0;font-size:1.05rem">📲 To install on iPhone: tap the Share button in Safari, then "Add to Home Screen" 💖</p>
+        <p class="hint" id="storageNote" style="margin:12px 0 0;font-size:1.05rem"></p>
+        <p class="acct" id="acct" hidden></p>
+      </div>
+    </section>
+
+    <footer>made with 💖 for the SCS External Princess · stay sparkly ✨</footer>
+  </div>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
