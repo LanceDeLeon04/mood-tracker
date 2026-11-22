@@ -14,8 +14,21 @@ const SB_URL = import.meta.env.VITE_SUPABASE_URL;
 const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const cloud = Boolean(SB_URL && SB_KEY);
+
+// Phones often report "online" on wifi/data with no real internet. Without a time limit a request would hang
+// for a minute or more; this makes it fail fast so the app just keeps working from the phone's copy.
+const NET_TIMEOUT_MS = 15000;
+function fetchWithTimeout(input, init = {}) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), NET_TIMEOUT_MS);
+  if (init.signal) {
+    if (init.signal.aborted) ctl.abort();
+    else init.signal.addEventListener('abort', () => ctl.abort(), { once: true });
+  }
+  return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
+}
 export const supabase = cloud
-  ? createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
+  ? createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }, global: { fetch: fetchWithTimeout } })
   : null;
 
 const TABLE = 'mood_entries';
@@ -346,6 +359,7 @@ function storedSessionUser() {
 export const auth = {
   /** Keep our own copy of "who is logged in on this phone" so the diary can always open offline. */
   remember(user) { try { localStorage.setItem(LAST_USER, JSON.stringify({ id: user.id, email: user.email || '' })); } catch (e) { /* ignore */ } },
+  remembered() { return storedSessionUser(); },
   forget() { try { localStorage.removeItem(LAST_USER); } catch (e) { /* ignore */ } },
   /** 'ok' = valid login · 'retry' = can't tell (bad network) · 'none' = the server says she must log in again */
   async checkSession() {
@@ -359,15 +373,16 @@ export const auth = {
   /** The signed-in session, or — if the phone is offline and the token can't be refreshed — a stand-in built from
    *  the saved login, so the diary still opens with no signal. */
   async getSessionSafe() {
+    // Logged in before on this phone → open the diary RIGHT AWAY from the saved login, with no network at all.
+    // The real login is confirmed quietly in the background (see verifyOfflineSession in main.js).
     const stored = storedSessionUser();
-    // Offline: don't wait on the network at all (supabase-js would retry the token refresh for ~30s).
-    if (!isOnline() && stored) return { user: stored, offline: true };
+    if (stored) return { user: stored, offline: true };
     try {
-      const wait = new Promise((resolve) => setTimeout(() => resolve(null), stored ? 3000 : 8000));
+      const wait = new Promise((resolve) => setTimeout(() => resolve(null), 8000));
       const res = await Promise.race([supabase.auth.getSession(), wait]);
       if (res && res.data && res.data.session) return res.data.session;
     } catch (e) { /* offline or slow */ }
-    return stored ? { user: stored, offline: true } : null;
+    return null;
   },
   onChange(cb) { return supabase.auth.onAuthStateChange(cb); },
   async signIn(email, password) {
@@ -393,6 +408,17 @@ export const auth = {
   },
   async setPassword(password) {
     const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw error;
+  },
+  /** Change password from inside the app. Re-checks the current password first (this also satisfies Supabase's
+   *  "secure password change" setting, which wants a recent login). */
+  async changePassword(email, current, next) {
+    const { error: e1 } = await supabase.auth.signInWithPassword({ email, password: current });
+    if (e1) {
+      if (/invalid login|invalid credentials/i.test(e1.message || '')) throw new Error('That current password is not right 🥺');
+      throw e1;
+    }
+    const { error } = await supabase.auth.updateUser({ password: next });
     if (error) throw error;
   },
 };

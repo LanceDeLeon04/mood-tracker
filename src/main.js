@@ -465,11 +465,19 @@ async function submitAuth(ev) {
 
 /* ============================== session / boot ============================== */
 function showAuth() {
+  $('#authBack').hidden = true;
   $('#loading').hidden = true;
   $('#app').hidden = true;
   $('#auth').hidden = false;
   updateChip();
   syncGuestBtn();
+}
+// the login screen opened on request (from the app), with a way back to the diary
+function openLogin(msg) {
+  setAuthMode('signin');
+  showAuth();
+  $('#authBack').hidden = false;
+  if (msg) authMsg(msg, 'ok');
 }
 function syncGuestBtn() {
   const off = navigator.onLine === false;
@@ -483,6 +491,7 @@ function showApp() {
   greet();
   renderAll();
   updateChip();
+  checkOfflineReady();
 }
 
 async function handleSession(session) {
@@ -495,8 +504,10 @@ async function handleSession(session) {
     showAuth();
     return;
   }
-  if (!session.offline) offlineSession = false;
+  if (!session.offline) { offlineSession = false; if (needsLogin) { needsLogin = false; updateChip(); } }
   if (state.uid === session.user.id && !$('#app').hidden) return;
+  needsLogin = false;
+  state.email = session.user.email || '';
   offlineSession = Boolean(session.offline);
   auth.remember(session.user);
   state.uid = session.user.id;
@@ -526,6 +537,8 @@ function enterGuest() {
   keepStorage();
 }
 const isGuest = () => state.uid === 'guest';
+let needsLogin = false;      // the server no longer accepts the saved login: keep working, offer a gentle re-login
+let loggingOut = false;
 let offlineSession = false; // true while we're using the saved login without having confirmed it online
 
 // Offline we trust the saved login. Once online, confirm it; only if the server says "log in again" do we ask,
@@ -535,13 +548,11 @@ async function verifyOfflineSession() {
   const r = await auth.checkSession();
   if (r === 'ok') { offlineSession = false; return true; }
   if (r === 'none') {
+    // The server says she must log in again (e.g. password changed elsewhere). Don't lock her out of her diary:
+    // keep the app open, keep saving on the phone, and show a small "Log in to sync" button.
     offlineSession = false;
-    auth.forget();
-    state.uid = null;
-    store.close();
-    setAuthMode('signin');
-    showAuth();
-    authMsg('Please log in again to finish syncing. Your offline entries are safe on this phone 💕', 'ok');
+    if (!needsLogin) { needsLogin = true; toast('Tap "Log in to sync" at the top to keep backing up 🔑'); }
+    updateChip();
     return false;
   }
   return true; // network still flaky: keep working offline
@@ -551,9 +562,11 @@ function updateChip() {
   const el = $('#syncChip');
   if (!cloud || $('#app').hidden) { el.hidden = true; return; }
   $('#logout').hidden = isGuest();
+  $('#changePw').hidden = isGuest();
   const s = store.status();
   let text, cls;
   if (isGuest()) { text = s.online ? '🔑 Log in to back up' : '📴 Offline · not logged in'; cls = s.online ? 'warn' : 'off'; }
+  else if (needsLogin && s.online) { text = '🔑 Log in to sync'; cls = 'warn'; }
   else if (!s.online) { text = s.pending ? `📴 Offline · ${s.pending} waiting` : '📴 Offline'; cls = 'off'; }
   else if (s.syncing) { text = '🔄 Syncing…'; cls = 'busy'; }
   else if (s.pending) { text = `⏳ ${s.pending} waiting · tap to sync`; cls = 'warn'; }
@@ -568,11 +581,9 @@ function updateChip() {
 }
 
 async function manualSync() {
-  if (isGuest()) {
+  if (isGuest() || needsLogin) {
     if (navigator.onLine === false) { toast("You're offline. Everything is saved on your phone. Log in later to back it up 💕"); return; }
-    setAuthMode('signin');
-    showAuth();
-    authMsg('Log in to back up your entries. They are safe on this phone 💕', 'ok');
+    openLogin(isGuest() ? 'Log in to back up your entries. They are safe on this phone 💕' : 'Please log in again to keep backing up. Your entries are safe on this phone 💕');
     return;
   }
   const s = store.status();
@@ -580,6 +591,19 @@ async function manualSync() {
   const r = await syncNow();
   if (r && r.ok) toast('☁️ Up to date');
   else if (r && !r.queued) toast("Couldn't reach the server. Will keep trying 🔁");
+}
+
+// Tell her whether the app is saved on the phone for offline use (so she can check BEFORE losing signal)
+async function checkOfflineReady() {
+  const el = $('#offlineReady');
+  if (!('serviceWorker' in navigator) || !window.caches) { el.textContent = "⚠️ This browser can't save the app for offline use. Use Chrome (Android) or Safari (iPhone)."; return; }
+  const none = new Promise((r) => setTimeout(() => r(null), 3500));
+  const reg = await Promise.race([navigator.serviceWorker.ready.catch(() => null), none]);
+  if (!reg) { el.textContent = 'ℹ️ Offline mode switches on in the deployed (https) app, after its first visit.'; return; }
+  let hit = null;
+  try { hit = await caches.match('/index.html', { ignoreSearch: true }); } catch (e) { /* ignore */ }
+  el.textContent = hit ? '✅ Offline mode is ready. This app opens and saves with no internet.' : '⏳ Getting offline mode ready… keep the app open for a moment.';
+  if (!hit) setTimeout(checkOfflineReady, 4000);
 }
 
 // ask the browser not to clear this app's saved data when the phone is low on space
@@ -615,21 +639,60 @@ function setupServiceWorker() {
   updateSW = registerSW({
     immediate: true,
     onNeedRefresh() { pendingUpdate = true; tryApplyUpdate(); },
-    onOfflineReady() { toast('Ready to work offline 📴💖'); },
+    onOfflineReady() { toast('Ready to work offline 📴💖'); checkOfflineReady(); },
     onRegisteredSW(url, reg) { if (reg) setInterval(() => { reg.update().catch(() => {}); }, 60 * 60 * 1000); },
   });
 }
 
+function openChangePassword() {
+  if (navigator.onLine === false) { toast('Connect to the internet to change your password 🔐'); return; }
+  if (!state.email) { toast('Please log in first 🔑'); return; }
+  $('#modal').innerHTML = `<div class="bigem">🔐</div><h3>Change password</h3>
+    <form id="pwForm" class="pwform" novalidate>
+      <label class="lbl" for="pwOld">Current password</label><input type="password" id="pwOld" autocomplete="current-password">
+      <label class="lbl" for="pwNew">New password</label><input type="password" id="pwNew" autocomplete="new-password">
+      <label class="lbl" for="pwNew2">Confirm new password</label><input type="password" id="pwNew2" autocomplete="new-password">
+      <div class="authmsg" id="pwMsg" role="status" aria-live="polite"></div>
+      <button class="btn big" type="submit" id="pwSave">Save new password 💖</button>
+      <button class="link" type="button" id="pwCancel">Cancel</button>
+    </form>`;
+  $('#overlay').classList.add('on');
+  const say = (t, k) => { const m = $('#pwMsg'); m.textContent = t || ''; m.className = 'authmsg' + (k ? ' ' + k : ''); };
+  $('#pwCancel').onclick = () => $('#overlay').classList.remove('on');
+  $('#pwForm').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const oldPw = $('#pwOld').value, n1 = $('#pwNew').value, n2 = $('#pwNew2').value;
+    if (!oldPw) return say('Enter your current password 🔐', 'err');
+    if (n1.length < 6) return say('New password must be at least 6 characters 🔐', 'err');
+    if (n1 !== n2) return say("The new passwords don't match 🥺", 'err');
+    if (n1 === oldPw) return say('Choose a password different from the current one 💕', 'err');
+    const btn = $('#pwSave');
+    btn.disabled = true; btn.textContent = 'Saving… 💞'; say('');
+    try {
+      await auth.changePassword(state.email, oldPw, n1);
+      $('#overlay').classList.remove('on');
+      toast('Password changed 🔐💖');
+      confetti(25);
+    } catch (e) {
+      say(/different from the old/i.test(e.message || '') ? 'Choose a password different from the current one 💕' : friendly(e.message), 'err');
+      btn.disabled = false; btn.textContent = 'Save new password 💖';
+    }
+  };
+  setTimeout(() => { try { $('#pwOld').focus(); } catch (e) { /* ignore */ } }, 50);
+}
+
 async function doLogout() {
+  if (!confirm('Sign out of this phone? You will need to log in again.')) return;
+  loggingOut = true;
   try {
     if (store.pendingCount() && navigator.onLine !== false) await store.sync();
     const n = store.pendingCount();
-    if (n && !confirm(`${n} entr${n === 1 ? 'y hasn\'t' : 'ies haven\'t'} uploaded yet. They stay safely on this phone until you log back in. Log out anyway?`)) return;
+    if (n && !confirm(`${n} entr${n === 1 ? 'y hasn\'t' : 'ies haven\'t'} uploaded yet. They stay safely on this phone until you log back in. Sign out anyway?`)) return;
     const unsynced = n > 0;
     await auth.signOut();
     if (!unsynced) store.purge(); // nothing waiting → also remove this phone's copy of the diary
     await handleSession(null);
-  } catch (e) { oops('log out', e); }
+  } catch (e) { oops('log out', e); } finally { loggingOut = false; }
 }
 
 function wire() {
@@ -691,6 +754,8 @@ function wire() {
   $('#lnkSwitch').addEventListener('click', () => setAuthMode(authMode === 'signin' ? 'signup' : 'signin'));
   $('#lnkForgot').addEventListener('click', () => setAuthMode('forgot'));
   $('#logout').addEventListener('click', doLogout);
+  $('#changePw').addEventListener('click', openChangePassword);
+  $('#authBack').addEventListener('click', () => { $('#auth').hidden = true; $('#app').hidden = false; updateChip(); });
   $('#syncChip').addEventListener('click', manualSync);
   $('#guestBtn').addEventListener('click', () => { authMsg(''); enterGuest(); });
 
@@ -736,14 +801,16 @@ async function boot() {
 
   $('#storageNote').textContent = 'Saved on this phone first, then backed up to your account whenever you\'re online, so it also follows you to any device 💕';
   $('#logout').hidden = false;
+  $('#changePw').hidden = false;
   setAuthMode('signin');
   auth.onChange((event, session) => {
     // don't await supabase calls inside this callback; defer instead
     setTimeout(() => {
       if (event === 'PASSWORD_RECOVERY') { recovering = true; setAuthMode('recovery'); showAuth(); return; }
       if (event === 'SIGNED_OUT') {
-        if (navigator.onLine === false) return; // never kick her out because of a missing connection
-        auth.forget();
+        if (navigator.onLine === false || loggingOut) return; // never kick her out because of a missing connection
+        if (!state.uid && auth.remembered()) return;           // startup: boot() opens her diary from the saved login
+        if (state.uid && !isGuest()) { needsLogin = true; updateChip(); return; } // keep her diary open; offer re-login
         handleSession(null);
         return;
       }

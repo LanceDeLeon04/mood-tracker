@@ -247,3 +247,8 @@ footer{text-align:center;font-family:'Dancing Script',cursive;font-size:1.35rem;
 }
 
 .authnote{margin:12px 0 0;font-size:.82rem;color:var(--soft)}
+
+.subhead{font-family:'Pacifico',cursive;font-weight:400;font-size:1.05rem;color:var(--pink-d);margin:18px 0 8px}
+.pwform label.lbl{text-align:left;margin-top:12px}
+.pwform .authmsg{min-height:22px}
+.pwform .link{display:block;margin:6px auto 0}

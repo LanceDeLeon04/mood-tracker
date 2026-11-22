@@ -8,6 +8,7 @@ A girly, phone-first mood checker and tracker for the SCS External Princess. Vit
 - 👑 Reports: download as HTML, CSV, print/save as PDF, or share from the phone's share sheet
 - 🔐 Private login. Each account only ever sees its own entries (Supabase Row Level Security)
 - 📱 Phone-first: bottom tab bar, big tap targets, sticky Save button, bottom-sheet popups
+- 🔐 **Change password** from inside the app (Reports → Royal Tools → Account)
 - 📴 **Works fully offline** (installable PWA): moods save instantly on the phone and upload by themselves when there's signal
 
 ## 1. Set up Supabase (about 5 minutes)
@@ -31,6 +32,12 @@ A girly, phone-first mood checker and tracker for the SCS External Princess. Vit
 
 Open the Vercel URL **once with internet**, log in, then install it: **Share → Add to Home Screen** (iPhone Safari) or the **📲 Install app** button in Reports → Royal Tools (Android Chrome). She stays logged in, and the app opens offline from then on.
 
+**Check it's ready:** open **Reports → Royal Tools**. It should say **✅ Offline mode is ready**. Then try airplane mode and open the app. It works.
+
+- **iPhone:** the Home Screen app keeps its own storage, separate from Safari. So after *Add to Home Screen*, open the **new Home Screen icon once with internet** and log in there. After that it works with no signal.
+- **Android (Chrome):** same idea. Open it once online after installing, then it works offline.
+- Wifi with no real internet ("connected, no internet") counts as offline too: the app opens instantly from the phone's copy and gives up on the server after 15 seconds instead of hanging.
+
 New versions you deploy are picked up automatically the next time she opens the app online (never while she's halfway through a check-in).
 
 ## How offline mode works
@@ -40,11 +47,11 @@ New versions you deploy are picked up automatically the next time she opens the 
 - When there is a connection, and each time the app is opened or comes back to the front, the queue uploads to Supabase and the latest diary is pulled back down. A small chip at the top shows the state: `☁️ Synced`, `📴 Offline · 2 waiting`, `🔄 Syncing…`. Tap it to sync now.
 - Entries still waiting are marked **⏳ waiting to sync** in the diary.
 - Uploads are safe to retry: each entry gets its own ID on the phone, so a dropped connection never creates duplicates.
-- **She logs in once, and it stays that way.** The login is saved on the phone and is only removed when she taps **Log out**. The app never signs her out because of a bad or missing connection, and it opens offline even if the saved login has expired. When signal returns it renews the login quietly.
-- Only if the server itself says "log in again" (for example, after you reset her password) does the login screen reappear. Her offline entries stay safe on the phone and upload right after she logs in.
+- **She logs in once, and that's it.** The login is saved on the phone for good, so the login screen never comes back, online or offline. The app opens straight into the diary every time. Only **Sign out of this phone** (Reports → Royal Tools → Account) removes the saved login.
+- If the server ever stops accepting the saved login (for example, you reset her password in Supabase), the app does **not** lock her out. She keeps using her diary, and a small **🔑 Log in to sync** button appears at the top. After she logs in, everything waiting uploads.
 - **No login is needed while offline.** If the phone is offline and nobody is logged in, the app opens straight into the diary (or tap **Continue offline** on the login screen). Entries save on the phone, and when signal returns a **🔑 Log in to back up** chip appears. As soon as she logs in, those entries are added to her account automatically.
 - Logging in is only needed to back up and to see her diary on another device. The very first install still needs internet once to download the app.
-- Logging out with entries still waiting shows a warning. Those entries stay on the phone until she logs back in.
+- Signing out with entries still waiting shows a warning. Those entries stay on the phone until she logs back in.
 - Tip: use **Install app / Add to Home Screen**. Installed apps keep their saved data much more reliably than a browser tab (Safari can clear a tab's data after about a week of not opening it).
 
 ## Moving over the old single-file app's data
@@ -62,6 +69,7 @@ With no `.env.local`, the app runs in **local mode**: no login, data saved only 
 
 ## Notes
 
+- Forgot the password? In Supabase, open **Authentication → Users**, click her user and send a password recovery email (or set a new password there). Then she can use the **🔑 Log in to sync** button with the new one.
 - The anon key is safe in the browser **because** Row Level Security is on. Keep the policies from `schema.sql`.
 - Table: `mood_entries` (`logged_at`, `mood`, `energy`, `stress`, `social`, `tags[]`, `care[]`, `note`, `is_sample`). Adding a new mood in `src/config.js` also needs it added to the `mood` check list in the SQL.
 - "Load sample data" adds clearly-marked demo rows; **Remove sample data** deletes only those.

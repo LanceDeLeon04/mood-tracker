@@ -32,8 +32,9 @@
     </div>
     <div class="authmsg" id="authMsg" role="status" aria-live="polite"></div>
     <button class="btn big" type="submit" id="authBtn">Log in 💖</button>
+    <button class="btn alt" type="button" id="authBack" hidden style="width:100%;margin-top:10px">← Back to my diary</button>
     <button class="btn alt" type="button" id="guestBtn" hidden style="width:100%;margin-top:10px">📴 Continue offline (no login needed)</button>
-    <p class="authnote">🔒 You'll stay signed in on this phone, even offline.</p>
+    <p class="authnote">🔒 Log in just once. This phone will remember you, even offline.</p>
     <div class="authlinks">
       <button type="button" class="link" id="lnkSwitch">Create an account</button>
       <button type="button" class="link" id="lnkForgot">Forgot password?</button>
@@ -52,7 +53,6 @@
         <button class="dot" data-t="mint" aria-label="Mint palette" style="background:linear-gradient(135deg,#6fe3c0,#7aa8ff)"></button>
       </div>
       <button class="pill sync ok" id="syncChip" hidden aria-live="polite">☁️ Synced</button>
-      <button class="pill" id="logout" hidden aria-label="Log out">🚪<span class="lbl"> Log out</span></button>
     </div>
 
     <div class="banner" id="localBanner" hidden>💾 Local mode — no Supabase keys found, so moods are saved on this device only.</div>
@@ -188,8 +188,14 @@
           <input type="file" id="impFile" accept=".json,application/json" hidden>
           <button class="btn alt small" id="clear">🗑️ Clear everything</button>
         </div>
+        <h3 class="subhead">🔐 Account</h3>
+        <div class="btnrow">
+          <button class="btn alt small" id="changePw" hidden>🔐 Change password</button>
+          <button class="btn alt small" id="logout" hidden>🚪 Sign out of this phone</button>
+        </div>
         <div class="btnrow" style="margin-top:12px"><button class="btn small" id="installBtn" hidden>📲 Install app on this phone</button></div>
         <p class="hint" id="iosHint" hidden style="margin:10px 0 0;font-size:1.05rem">📲 To install on iPhone: tap the Share button in Safari, then "Add to Home Screen" 💖</p>
+        <p class="hint" id="offlineReady" style="margin:12px 0 0;font-size:1.05rem">⏳ Checking offline mode…</p>
         <p class="hint" id="storageNote" style="margin:12px 0 0;font-size:1.05rem"></p>
         <p class="acct" id="acct" hidden></p>
       </div>
