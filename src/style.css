@@ -241,10 +241,6 @@ footer{text-align:center;font-family:'Dancing Script',cursive;font-size:1.35rem;
   .bars .b .nm{width:100px}
   .themes small{display:none}
 }
-@media(prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
-  .floaties{display:none}
-}
 
 .authnote{margin:12px 0 0;font-size:.82rem;color:var(--soft)}
 
@@ -252,3 +248,4 @@ footer{text-align:center;font-family:'Dancing Script',cursive;font-size:1.35rem;
 .pwform label.lbl{text-align:left;margin-top:12px}
 .pwform .authmsg{min-height:22px}
 .pwform .link{display:block;margin:6px auto 0}
+.btn.danger{background:linear-gradient(135deg,#ff6b81,#e0345a);color:#fff}

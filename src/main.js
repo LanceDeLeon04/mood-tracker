@@ -347,14 +347,29 @@ function removeSample() {
   renderAll();
   toast('Sample data removed 🧽');
 }
-function clearAll() {
-  if (!confirm('Delete ALL entries? This cannot be undone.')) return;
+// Pretty in-app confirm popup (replaces the browser's plain "This site says…" box)
+let pendingConfirm = null;
+function askConfirm({ emoji = '💭', title, text = '', yes = 'Yes', no = 'Cancel', danger = false }) {
+  return new Promise((resolve) => {
+    if (pendingConfirm) pendingConfirm(false);
+    const done = (v) => { pendingConfirm = null; $('#overlay').classList.remove('on'); resolve(v); };
+    pendingConfirm = done;
+    $('#modal').innerHTML = `<div class="bigem">${emoji}</div><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ''}<div class="btnrow stack" style="margin-top:14px"><button class="btn${danger ? ' danger' : ''}" id="cfYes">${esc(yes)}</button><button class="btn alt" id="cfNo">${esc(no)}</button></div>`;
+    $('#overlay').classList.add('on');
+    $('#cfYes').onclick = () => done(true);
+    $('#cfNo').onclick = () => done(false);
+    setTimeout(() => { try { $('#cfNo').focus(); } catch (e) { /* ignore */ } }, 50);
+  });
+}
+
+async function clearAll() {
+  if (!(await askConfirm({ emoji: '🗑️', title: 'Delete everything?', text: 'All diary entries will be removed. This cannot be undone.', yes: 'Yes, delete all', no: 'Keep my diary', danger: true }))) return;
   store.removeAll();
   renderAll();
   toast('All clean ✨');
 }
-function deleteEntry(id) {
-  if (!confirm('Delete this diary entry?')) return;
+async function deleteEntry(id) {
+  if (!(await askConfirm({ emoji: '🥺', title: 'Delete this entry?', text: 'This diary entry will be removed.', yes: 'Delete it', no: 'Keep it', danger: true }))) return;
   store.remove(id);
   renderAll();
   toast('Entry deleted 🗑️');
@@ -682,12 +697,12 @@ function openChangePassword() {
 }
 
 async function doLogout() {
-  if (!confirm('Sign out of this phone? You will need to log in again.')) return;
+  if (!(await askConfirm({ emoji: '🚪', title: 'Sign out of this phone?', text: 'You will need to log in again.', yes: 'Sign out', no: 'Stay logged in' }))) return;
   loggingOut = true;
   try {
     if (store.pendingCount() && navigator.onLine !== false) await store.sync();
     const n = store.pendingCount();
-    if (n && !confirm(`${n} entr${n === 1 ? 'y hasn\'t' : 'ies haven\'t'} uploaded yet. They stay safely on this phone until you log back in. Sign out anyway?`)) return;
+    if (n && !(await askConfirm({ emoji: '⏳', title: `${n} entr${n === 1 ? 'y hasn\'t' : 'ies haven\'t'} uploaded yet`, text: 'They stay safely on this phone until you log back in. Sign out anyway?', yes: 'Sign out anyway', no: 'Stay logged in' }))) return;
     const unsynced = n > 0;
     await auth.signOut();
     if (!unsynced) store.purge(); // nothing waiting → also remove this phone's copy of the diary
@@ -743,8 +758,9 @@ function wire() {
   $('#impBtn').addEventListener('click', () => $('#impFile').click());
   $('#impFile').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importFile(f); e.target.value = ''; });
 
-  $('#overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') $('#overlay').classList.remove('on'); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#overlay').classList.remove('on'); });
+  const closeOverlay = () => { $('#overlay').classList.remove('on'); if (pendingConfirm) { const f = pendingConfirm; pendingConfirm = null; f(false); } };
+  $('#overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay') closeOverlay(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOverlay(); });
 
   let rt;
   window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (activeTab === 'dash' && !$('#app').hidden) trend(); }, 200); });
