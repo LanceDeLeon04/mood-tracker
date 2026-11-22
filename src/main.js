@@ -654,7 +654,7 @@ function setupServiceWorker() {
   updateSW = registerSW({
     immediate: true,
     onNeedRefresh() { pendingUpdate = true; tryApplyUpdate(); },
-    onOfflineReady() { toast('Ready to work offline 📴💖'); checkOfflineReady(); },
+    onOfflineReady() { checkOfflineReady(); },
     onRegisteredSW(url, reg) { if (reg) setInterval(() => { reg.update().catch(() => {}); }, 60 * 60 * 1000); },
   });
 }
