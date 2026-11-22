@@ -8,15 +8,18 @@ import '@fontsource/dancing-script/latin-600.css';
 import '@fontsource/dancing-script/latin-700.css';
 import './style.css';
 import {
-  MOODS, MOOD, TAGS, CARE, COMPLIMENTS, QUOTES, SAMPLE_NOTES, PRINCESS_NAME, PICK_MSG, THEME_COLORS,
+  MOODS, MOOD, TAGS, CARE, COMPLIMENTS, SAMPLE_NOTES, PRINCESS_NAME, PICK_MSG, THEME_COLORS,
 } from './config.js';
 import {
-  $, $$, esc, dayKey, localInput, fmtDate, fmtTime, WD, pick, avg, download, buzz,
+  $, $$, esc, dayKey, localInput, fmtDate, fmtTime, WD, pick, avg, download, buzz, clamp,
 } from './utils.js';
 import {
   vibe, level, inRange, streak, stats, insightsList,
 } from './analytics.js';
 import { reportHTML, csv } from './report.js';
+import {
+  toneFor, localNote, fetchNote, cachedNote, saveNote, wasOpened, markOpened,
+} from './dailynote.js';
 import { cloud, auth, store, cleanEntry } from './store.js';
 import { registerSW } from 'virtual:pwa-register';
 
@@ -30,6 +33,7 @@ const selCare = new Set();
 // Captured at load, before supabase-js strips the hash: opened from a "reset password" email?
 let recovering = /type=recovery/.test(window.location.hash);
 let activeTab = 'checkin';
+const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ============================== helpers ============================== */
 function toast(t) {
@@ -98,12 +102,15 @@ function buildFloaties() {
 }
 
 function buildForm() {
-  $('#moods').innerHTML = MOODS.map((m) => `<button type="button" class="mood" data-k="${m.k}" aria-pressed="false"><span class="e">${m.e}</span><span class="n">${esc(m.n)}</span></button>`).join('');
-  $('#tags').innerHTML = TAGS.map((t) => `<button type="button" class="chip" data-v="${esc(t[1])}" aria-pressed="false">${t[0]} ${esc(t[1])}</button>`).join('');
-  $('#care').innerHTML = CARE.map((t) => `<button type="button" class="chip care" data-v="${esc(t[1])}" aria-pressed="false">${t[0]} ${esc(t[1])}</button>`).join('');
+  $('#moods').innerHTML = MOODS.map((m, i) => `<button type="button" class="mood" data-k="${m.k}" aria-pressed="false" style="--c:${m.c};--i:${i}"><span class="e">${m.e}</span><span class="n">${esc(m.n)}</span></button>`).join('');
+  $('#tags').innerHTML = TAGS.map((t, i) => `<button type="button" class="chip" data-v="${esc(t[1])}" aria-pressed="false" style="--i:${i}">${t[0]} ${esc(t[1])}</button>`).join('');
+  $('#care').innerHTML = CARE.map((t, i) => `<button type="button" class="chip care" data-v="${esc(t[1])}" aria-pressed="false" style="--i:${i}">${t[0]} ${esc(t[1])}</button>`).join('');
   $('#fMood').innerHTML = '<option value="">All moods 💞</option>' + MOODS.map((m) => `<option value="${m.k}">${m.e} ${esc(m.n)}</option>`).join('');
   $('#moodmsg').textContent = PICK_MSG;
   $('#when').value = localInput(new Date());
+  syncSliders(true);
+  buildProgress();
+  goStep(0, { instant: true });
 }
 
 function resetForm() {
@@ -117,6 +124,17 @@ function resetForm() {
   $('#note').value = '';
   $('#nc').textContent = '0';
   $('#when').value = localInput(new Date());
+  whenTouched = false;
+  $('#whenBox').hidden = true;
+  $('#whenBtn').textContent = 'change';
+  $('#whenBtn').setAttribute('aria-expanded', 'false');
+  $('#whenTxt').textContent = '🕒 Right now';
+  $('#flowMood').textContent = '👑';
+  $('#ambient').style.removeProperty('--mc');
+  $('#carePop').textContent = '';
+  resumeStep = 0;
+  syncSliders(true);
+  goStep(0, { instant: true });
 }
 
 function greet() {
@@ -124,18 +142,303 @@ function greet() {
   const hello = h < 5 ? 'Still up, ' : h < 12 ? 'Good morning, ' : h < 18 ? 'Good afternoon, ' : 'Good evening, ';
   const icon = h >= 5 && h < 12 ? '☀️' : h >= 12 && h < 18 ? '🌤️' : '🌙';
   $('#greeting').textContent = hello + PRINCESS_NAME + ' ' + icon;
+  const n = PRINCESS_NAME.toLowerCase();
+  $('#heroSub').textContent = `~ how's ${n}${n.slice(-1).repeat(4)} feeling today? ~`;
 }
-function qotd() { $('#qotd').textContent = QUOTES[Math.floor(Date.now() / 864e5) % QUOTES.length]; }
+
+// only touch the DOM when something changed, so background syncs never replay entrance animations
+function setHTML(el, html) { if (el.dataset.h !== html) { el.dataset.h = html; el.innerHTML = html; } }
+
+// date, streak and today's earlier check-ins, right under the greeting
+function renderHero() {
+  const now = new Date();
+  $('#heroDate').textContent = now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const all = E();
+  const key = dayKey(now);
+  const today = all.filter((e) => dayKey(new Date(e.ts)) === key).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  const st = streak(all);
+  const chips = [];
+  if (st > 0) chips.push(`<span class="hchip">🔥 ${st}-day streak</span>`);
+  if (today.length) {
+    today.slice(-4).forEach((e) => {
+      const m = MOOD[e.mood] || MOOD.meh;
+      chips.push(`<span class="hchip soft" title="${esc(m.n)}">${m.e} ${esc(fmtTime(e.ts))}</span>`);
+    });
+  } else {
+    chips.push('<span class="hchip soft">🌱 no check-in yet today</span>');
+  }
+  if (!formPristine()) chips.unshift('<span class="hchip draft">✍️ check-in in progress</span>');
+  setHTML($('#heroChips'), chips.join(''));
+  $('#startTxt').textContent = formPristine() ? (today.length ? 'Check in again ✨' : 'Start my check-in ✨') : 'Continue my check-in ✨';
+  $('#startSub').textContent = formPristine() ? '6 tiny steps · about a minute' : 'pick up right where you left off';
+
+  // the last 7 days as little mood bubbles
+  let wk = '';
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const k = dayKey(d);
+    const l = all.filter((e) => dayKey(new Date(e.ts)) === k).sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    const m = l.length ? (MOOD[l[l.length - 1].mood] || MOOD.meh) : null;
+    wk += `<div class="wd${i === 0 ? ' today' : ''}" style="--i:${6 - i}"><div class="b${m ? ' has' : ''}"${m ? ` style="background:${m.c}2b" title="${esc(m.n)}"` : ''}>${m ? m.e : '<i>·</i>'}</div><span>${i === 0 ? 'today' : WD[d.getDay()]}</span></div>`;
+  }
+  setHTML($('#weekStrip'), wk);
+}
+
+/* ============================== the sealed note ============================== */
+let note = null;
+let noteDay = '';
+const letterEl = () => $('#letter');
+
+function renderNote(n) {
+  const words = n.text.replace(/'/g, '\u2019').split(/\s+/).filter(Boolean);
+  words[0] = '\u201C' + words[0];
+  words[words.length - 1] += '\u201D';
+  $('#noteText').innerHTML = words.map((w, i) => `<span class="w" style="--i:${i}">${esc(w)}</span>`).join(' ');
+  $('#noteBy').textContent = '\u2014 ' + n.author;
+  $('#noteCard').style.setProperty('--n', words.length);
+}
+
+function openLetter(instant) {
+  const L = letterEl();
+  if (L.dataset.state !== 'sealed') return;
+  const btn = $('#sealBtn');
+  if (instant) {
+    L.classList.add('static', 'settled');
+    L.dataset.state = 'open';
+    btn.hidden = true;
+    $('#notePaper').inert = false;
+    return;
+  }
+  markOpened();
+  btn.setAttribute('aria-expanded', 'true');
+  btn.disabled = true;
+  buzz([15, 30, 15]);
+  confetti(18);
+  L.dataset.state = 'opening';
+  setTimeout(() => {
+    L.dataset.state = 'open';
+    $('#notePaper').inert = false;
+    try { $('#paper').focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+  }, 440);
+  setTimeout(() => { L.classList.add('settled'); btn.hidden = true; }, 1300);
+}
+
+// Today's note: same all day, new at midnight. Shown instantly from the phone's copy or the local bank,
+// then swapped for a fresh one from the web if that arrives before she opens the seal.
+function initNote() {
+  const now = new Date();
+  const day = dayKey(now);
+  const L = letterEl();
+  if (noteDay !== day) {
+    noteDay = day;
+    L.dataset.state = 'sealed';
+    L.classList.remove('settled', 'static');
+    const b = $('#sealBtn');
+    b.hidden = false; b.disabled = false; b.setAttribute('aria-expanded', 'false');
+    $('#notePaper').inert = true;
+  }
+  const opened = wasOpened(now);
+  const tone = toneFor(E(), now);
+  let n = cachedNote(now);
+  if (!n || (n.t !== tone && !opened)) { n = localNote(tone, now); saveNote(n); }
+  note = n;
+  renderNote(n);
+  if (opened) openLetter(true);
+  else if (n.src !== 'web' && navigator.onLine !== false) {
+    fetchNote(tone, now).then((w) => {
+      if (!w || noteDay !== day || wasOpened() || letterEl().dataset.state !== 'sealed') return;
+      note = w; saveNote(w); renderNote(w);
+    });
+  }
+}
+
+// small form helpers
+let whenTouched = false;
+const FACES = {
+  energy: ['🪫', '🪫', '😪', '😪', '🙂', '🙂', '😊', '⚡', '⚡', '🔋', '🚀'],
+  stress: ['🧘‍♀️', '🧘‍♀️', '😌', '😌', '🙂', '😬', '😬', '😰', '😵‍💫', '🤯', '🌋'],
+  social: ['🛌', '🛌', '🐚', '🐚', '🧸', '🙂', '😊', '🦋', '🦋', '🎉', '🎤'],
+};
+function syncSliders(quiet) {
+  ['energy', 'stress', 'social'].forEach((id) => {
+    const el = $('#' + id);
+    el.style.setProperty('--k', String(el.value / 10));
+    $('#v-' + id).textContent = el.value;
+    const face = $('#face-' + id);
+    const next = FACES[id][+el.value];
+    if (face.textContent !== next) {
+      face.textContent = next;
+      if (!quiet) { face.classList.remove('pulse'); void face.offsetWidth; face.classList.add('pulse'); }
+    }
+  });
+  liveVibe(quiet);
+}
+function liveVibe(quiet) {
+  const v = vibe({ mood: selMood || 'meh', energy: +$('#energy').value, stress: +$('#stress').value, social: +$('#social').value });
+  $('#liveVibe').textContent = v;
+  $('#liveLevel').textContent = level(v)[0];
+  $('#liveArc').style.strokeDashoffset = (213.6 * (1 - v / 100)).toFixed(1);
+}
+
+// little one-shot animations that never fight with the CSS ones
+function bounce(el, from = 0.86) {
+  if (reduced || !el || !el.animate) return;
+  el.animate([{ transform: `scale(${from})` }, { transform: 'scale(1.1)', offset: 0.55 }, { transform: 'scale(1)' }], { duration: 450, easing: 'cubic-bezier(.34,1.56,.64,1)' });
+}
+function swapIn(el) {
+  if (reduced || !el || !el.animate) return;
+  el.animate([{ opacity: 0, transform: 'translateY(8px) scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: 480, easing: 'cubic-bezier(.22,1,.36,1)' });
+}
+// numbers that count up instead of just appearing
+function countUp(el, to, { dec = 0, ms = 1100, suffix = '' } = {}) {
+  if (!el) return;
+  to = Number(to);
+  if (reduced || !Number.isFinite(to)) { el.textContent = (Number.isFinite(to) ? to.toFixed(dec) : el.textContent) + suffix; return; }
+  const t0 = performance.now();
+  const tick = (t) => {
+    const k = Math.min(1, (t - t0) / ms);
+    const e = 1 - Math.pow(1 - k, 4);
+    el.textContent = (to * e).toFixed(dec) + suffix;
+    if (k < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+/* ============================== the multi-step check-in ============================== */
+// 0 welcome · 1 mood · 2 meters · 3 factors · 4 self-care · 5 diary · 6 review
+const STEPS = [null, 'Mood', 'Royal Meters', 'What\u2019s affecting you', 'Self-care', 'Dear Diary', 'Review'];
+let step = 0;
+let resumeStep = 0;
+let stepBusy = false;
+const stepEl = (n) => document.querySelector(`.step[data-step="${n}"]`);
+
+function buildProgress() {
+  $('#prog').innerHTML = STEPS.slice(1).map(() => '<i></i>').join('');
+}
+
+function syncView() {
+  document.body.dataset.view = activeTab !== 'checkin' ? 'other' : step === 0 ? 'landing' : 'flow';
+}
+
+function syncNav() {
+  const inFlow = step > 0;
+  $('#flowbar').hidden = !inFlow;
+  $('#stepLabel').hidden = !inFlow;
+  $('#flownav').hidden = !inFlow;
+  if (!inFlow) return;
+  const last = step === STEPS.length - 1;
+  $('#save').hidden = !last;
+  $('#nextBtn').hidden = last;
+  $('#backBtn').textContent = step === 1 ? '← Home' : '← Back';
+  const nb = $('#nextBtn');
+  const labels = {
+    1: selMood ? 'Next →' : 'Pick a mood 💕',
+    2: 'Next →',
+    3: selTags.size ? 'Next →' : 'Skip →',
+    4: selCare.size ? 'Next →' : 'Skip →',
+    5: $('#note').value.trim() ? 'Review ✨' : 'Skip to review →',
+  };
+  nb.textContent = labels[step] || 'Next →';
+  const idle = step === 1 && !selMood;
+  nb.classList.toggle('idle', idle);
+  nb.classList.toggle('go', !idle && step === 1);
+  $$('#prog i').forEach((seg, i) => { seg.classList.toggle('done', i + 1 < step); seg.classList.toggle('cur', i + 1 === step); });
+  $('#prog').setAttribute('aria-valuenow', String(step));
+  $('#stepLabel').textContent = `Step ${step} of ${STEPS.length - 1} · ${STEPS[step]}`;
+}
+
+function onStepShown() {
+  $('#wizard').dataset.step = String(step);
+  syncView();
+  syncNav();
+  if (step === 2) liveVibe();
+  if (step === 6) renderSummary();
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  const h = stepEl(step) && stepEl(step).querySelector('.stepttl');
+  if (h) { try { h.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  if (step === 0) renderHero();
+}
+
+function goStep(n, { instant = false } = {}) {
+  n = clamp(n, 0, STEPS.length - 1);
+  if (stepBusy) return;
+  if (n === step && !instant) return;
+  const dir = n >= step ? 'fwd' : 'back';
+  const from = stepEl(step);
+  const to = stepEl(n);
+  const swap = () => {
+    $$('.step').forEach((el) => {
+      el.hidden = el !== to;
+      el.classList.remove('in-fwd', 'in-back', 'out-fwd', 'out-back');
+    });
+    if (!instant) to.classList.add('in-' + dir);
+    step = n;
+    stepBusy = false;
+    onStepShown();
+  };
+  if (instant || reduced || !from || from.hidden) { swap(); return; }
+  stepBusy = true;
+  from.classList.add('out-' + dir);
+  setTimeout(swap, 190);
+}
+
+function nextStep() {
+  if (step === 1 && !selMood) {
+    toast('Pick a mood first, princess 💕');
+    buzz(30);
+    const nb = $('#nextBtn');
+    nb.classList.remove('shake'); void nb.offsetWidth; nb.classList.add('shake');
+    return;
+  }
+  buzz(8);
+  goStep(step + 1);
+}
+
+function startFlow() {
+  buzz(12);
+  goStep(!formPristine() && resumeStep > 0 ? resumeStep : 1);
+}
+function closeFlow() {
+  resumeStep = step;
+  goStep(0);
+}
+
+// everything she picked, on one page, with a way back to change each part
+function renderSummary() {
+  if (!selMood) { goStep(1, { instant: true }); return; }
+  const m = MOOD[selMood];
+  const en = +$('#energy').value, st = +$('#stress').value, so = +$('#social').value;
+  const v = vibe({ mood: selMood, energy: en, stress: st, social: so });
+  const lv = level(v);
+  const when = whenTouched ? new Date($('#when').value) : new Date();
+  const note = $('#note').value.trim();
+  const chips = (arr, cls) => (arr.length ? `<div class="sumchips">${arr.map((t) => `<span class="tag${cls}">${esc(t)}</span>`).join('')}</div>` : '<div class="sumnone">nothing picked</div>');
+  const meter = (label, val, i) => `<div class="mrow"><span class="mn">${label}</span><span class="mt"><span class="mf" style="--w:${val * 10}%;--i:${i}"></span></span><span class="mv">${val}</span></div>`;
+  $('#summary').innerHTML = `
+    <div class="sumhero" style="--mc:${m.c}">
+      <div class="sumem">${m.e}</div>
+      <div class="sumtxt"><div class="sumname">${esc(m.n)}</div><div class="sumlvl">${esc(lv[0])}</div><button type="button" class="edit" data-go="1" style="margin-top:8px">change mood</button></div>
+      <div class="sumscore"><svg viewBox="0 0 80 80" aria-hidden="true"><defs><linearGradient id="sg" x1="0" x2="1"><stop offset="0" stop-color="#ff7cbc"/><stop offset="1" stop-color="#b98cff"/></linearGradient></defs><circle cx="40" cy="40" r="34" fill="none" stroke="#fff" stroke-width="9"/><circle class="arc" cx="40" cy="40" r="34" fill="none" stroke="url(#sg)" stroke-width="9" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="${(213.6 * (1 - v / 100)).toFixed(1)}" transform="rotate(-90 40 40)"/></svg><b id="sumV">0</b></div>
+    </div>
+    <div class="sumcard" style="--i:0"><div class="sh"><span>🎚️ Royal Meters</span><button type="button" class="edit" data-go="2">edit</button></div>
+      ${meter('⚡ Energy', en, 0)}${meter('😵‍💫 Stress', st, 1)}${meter('🦋 Social', so, 2)}</div>
+    <div class="sumcard" style="--i:1"><div class="sh"><span>🎀 Affecting your mood</span><button type="button" class="edit" data-go="3">edit</button></div>${chips([...selTags], '')}</div>
+    <div class="sumcard" style="--i:2"><div class="sh"><span>🧴 Self-care</span><button type="button" class="edit" data-go="4">edit</button></div>${chips([...selCare], ' g')}</div>
+    <div class="sumcard" style="--i:3"><div class="sh"><span>📔 Dear Diary</span><button type="button" class="edit" data-go="5">edit</button></div>${note ? `<div class="sumnote">“${esc(note)}”</div>` : '<div class="sumnone">no note today</div>'}</div>
+    <div class="sumwhen">🕒 ${esc(whenTouched && !isNaN(when) ? when.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Right now')}</div>`;
+  countUp($('#sumV'), v, { ms: 1400 });
+}
 
 /* ============================== save ============================== */
 async function saveEntry() {
   if (!selMood) {
     toast('Pick a mood first, princess 💕');
     buzz(30);
-    $('#moods').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    goStep(1);
     return;
   }
-  const when = new Date($('#when').value);
+  // "Right now" means the moment she taps Save, not whenever the page was opened
+  const when = whenTouched ? new Date($('#when').value) : new Date();
   const row = cleanEntry({
     ts: isNaN(when) ? new Date() : when,
     mood: selMood,
@@ -154,6 +457,7 @@ async function saveEntry() {
   $('#modal').innerHTML = `<div class="bigem">${m.e}</div><h3>Royal Mood Saved!</h3><div class="vs">${v}/100</div><p><b>${esc(lv[0])}</b><br><small>${esc(lv[1])}</small></p><div class="adv">${esc(pick(m.adv))}</div><p>${esc(pick(COMPLIMENTS))}</p><p><small>🔥 Streak: ${st} day${st === 1 ? '' : 's'}</small></p><button class="btn" id="closeM">Thank you 💕</button>`;
   $('#overlay').classList.add('on');
   $('#closeM').onclick = () => $('#overlay').classList.remove('on');
+  countUp($('#modal .vs'), v, { suffix: '/100', ms: 1200 });
   buzz(m.s >= 4 ? [20, 40, 20] : 20);
   confetti(m.s >= 4 ? 60 : 30);
   resetForm();
@@ -169,26 +473,27 @@ function renderStats() {
   $('#stats').innerHTML = [
     ['🔥', streak(all), 'day streak'], ['📝', all.length, 'total check-ins'],
     ['💫', o.n ? Math.round(o.vibe) : '–', 'avg vibe'], ['⚡', o.n ? o.energy.toFixed(1) : '–', 'avg energy'],
-  ].map((s) => `<div class="stat"><div class="big">${s[0]} ${s[1]}</div><div class="tt">${s[2]}</div></div>`).join('');
+  ].map((s, i) => `<div class="stat" style="--ci:${i}"><div class="big">${s[0]} <span class="cu"${/^\d+(\.\d+)?$/.test(String(s[1])) ? ` data-to="${s[1]}" data-dec="${String(s[1]).split('.')[1] ? 1 : 0}"` : ''}>${s[1]}</span></div><div class="tt">${s[2]}</div></div>`).join('');
+  $$('#stats .cu[data-to]').forEach((el) => countUp(el, el.dataset.to, { dec: +el.dataset.dec, ms: 1000 }));
 
   const todayKey = dayKey(new Date());
   const today = all.filter((e) => dayKey(new Date(e.ts)) === todayKey).sort((a, b) => new Date(a.ts) - new Date(b.ts));
   const last = today[today.length - 1];
   if (last) {
     const v = vibe(last), m = MOOD[last.mood], lv = level(v);
-    $('#gaugeCard').innerHTML = `<h2>🌡️ Today's Royal Mood Meter</h2><svg viewBox="0 0 200 125" role="img" aria-label="Today's vibe ${v} out of 100"><defs><linearGradient id="gg" x1="0" x2="1"><stop offset="0" stop-color="#ffb3d6"/><stop offset=".5" stop-color="#ff5fa8"/><stop offset="1" stop-color="#b98cff"/></linearGradient></defs><path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="#fff" stroke-width="18" stroke-linecap="round"/><path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="url(#gg)" stroke-width="18" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="${(251.3 * (1 - v / 100)).toFixed(1)}" style="transition:stroke-dashoffset 1s"/><text x="100" y="78" text-anchor="middle" font-size="38">${m.e}</text><text x="100" y="106" text-anchor="middle" font-size="22" font-weight="700" fill="#d92f84" font-family="Fredoka">${v}</text></svg><div class="gtitle">${esc(lv[0])}</div><div class="gsub">${esc(lv[1])} · ${today.length} check-in${today.length > 1 ? 's' : ''} today</div>`;
+    $('#gaugeCard').innerHTML = `<h2>🌡️ Today's Royal Mood Meter</h2><svg viewBox="0 0 200 125" role="img" aria-label="Today's vibe ${v} out of 100"><defs><linearGradient id="gg" x1="0" x2="1"><stop offset="0" stop-color="#ffb3d6"/><stop offset=".5" stop-color="#ff5fa8"/><stop offset="1" stop-color="#b98cff"/></linearGradient></defs><path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="#fff" stroke-width="18" stroke-linecap="round"/><path class="arc" d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="url(#gg)" stroke-width="18" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="${(251.3 * (1 - v / 100)).toFixed(1)}"/><text x="100" y="78" text-anchor="middle" font-size="38">${m.e}</text><text x="100" y="106" text-anchor="middle" font-size="22" font-weight="700" fill="#d92f84" font-family="Fredoka">${v}</text></svg><div class="gtitle">${esc(lv[0])}</div><div class="gsub">${esc(lv[1])} · ${today.length} check-in${today.length > 1 ? 's' : ''} today</div>`;
   } else {
     $('#gaugeCard').innerHTML = '<h2>🌡️ Today\'s Royal Mood Meter</h2><div class="empty">No check-in yet today 🥺<br>Tap "Check-in" to log your mood!</div>';
   }
 
   const ins = insightsList(o, list);
-  $('#insights').innerHTML = ins.length ? ins.map((t) => `<div class="insight">${t}</div>`).join('') : '<div class="empty">Log a few moods and the insights will appear ✨</div>';
+  $('#insights').innerHTML = ins.length ? ins.map((t, i) => `<div class="insight" style="--i:${i}">${t}</div>`).join('') : '<div class="empty">Log a few moods and the insights will appear ✨</div>';
 
   const maxd = Math.max(1, ...Object.values(o.dist));
-  $('#mix').innerHTML = o.n ? MOODS.map((m) => `<div class="b"><span class="nm">${m.e} ${esc(m.n)}</span><span class="tr"><span class="fl" style="display:block;width:${o.dist[m.k] / maxd * 100}%;background:${m.c}"></span></span><span class="ct">${o.dist[m.k]}</span></div>`).join('') : '<div class="empty">Nothing here yet 🌸</div>';
+  $('#mix').innerHTML = o.n ? MOODS.map((m, i) => `<div class="b"><span class="nm">${m.e} ${esc(m.n)}</span><span class="tr"><span class="fl" style="display:block;--w:${o.dist[m.k] / maxd * 100}%;--i:${i};background:${m.c}"></span></span><span class="ct">${o.dist[m.k]}</span></div>`).join('') : '<div class="empty">Nothing here yet 🌸</div>';
 
   const cmax = Math.max(1, o.n);
-  $('#carebars').innerHTML = o.n ? CARE.map((c) => `<div class="b"><span class="nm">${c[0]} ${esc(c[1])}</span><span class="tr"><span class="fl" style="display:block;width:${o.care[c[1]] / cmax * 100}%;background:linear-gradient(90deg,#7fe5c4,#5fc9ff)"></span></span><span class="ct">${o.care[c[1]]}</span></div>`).join('') : '<div class="empty">Nothing here yet 🧴</div>';
+  $('#carebars').innerHTML = o.n ? CARE.map((c, i) => `<div class="b"><span class="nm">${c[0]} ${esc(c[1])}</span><span class="tr"><span class="fl" style="display:block;--w:${o.care[c[1]] / cmax * 100}%;--i:${i};background:linear-gradient(90deg,#7fe5c4,#5fc9ff)"></span></span><span class="ct">${o.care[c[1]]}</span></div>`).join('') : '<div class="empty">Nothing here yet 🧴</div>';
 
   if (o.n) {
     const W = 320, H = 150, bw = 30, gap = (W - 7 * bw) / 8;
@@ -197,7 +502,7 @@ function renderStats() {
       const x = gap + i * (bw + gap);
       const h = v == null ? 4 : Math.max(6, v / 100 * H);
       const y = H - h;
-      s += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="10" fill="${v == null ? '#fff' : 'url(#wg)'}"/>`;
+      s += `<rect class="wbar" style="--i:${i}" x="${x}" y="${y}" width="${bw}" height="${h}" rx="10" fill="${v == null ? '#fff' : 'url(#wg)'}"/>`;
       if (v != null) s += `<text x="${x + bw / 2}" y="${y - 5}" text-anchor="middle" font-size="11" fill="#d92f84" font-weight="600" font-family="Fredoka">${Math.round(v)}</text>`;
       s += `<text x="${x + bw / 2}" y="${H + 18}" text-anchor="middle" font-size="12" fill="#a46d97" font-family="Fredoka">${WD[i]}</text>`;
     });
@@ -232,7 +537,7 @@ function trend() {
   const valid = pts.map((p, i) => (p.v == null ? null : [x(i), y(p.v)])).filter(Boolean);
   if (valid.length > 1) {
     const path = valid.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-    s += `<path d="${path} L${valid[valid.length - 1][0]} ${H - B} L${valid[0][0]} ${H - B} Z" fill="url(#tg)"/><path d="${path}" fill="none" stroke="#ff5fa8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
+    s += `<path class="trendarea" d="${path} L${valid[valid.length - 1][0]} ${H - B} L${valid[0][0]} ${H - B} Z" fill="url(#tg)"/><path class="trendline" pathLength="1" d="${path}" fill="none" stroke="#ff5fa8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
   pts.forEach((p, i) => {
     if ((i % every === 0 && 13 - i >= every) || i === 13) s += `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" font-size="11" fill="#a46d97" font-family="Fredoka">${p.d.getMonth() + 1}/${p.d.getDate()}</text>`;
@@ -240,7 +545,7 @@ function trend() {
       const k = dayKey(p.d);
       const l = E().filter((e) => dayKey(new Date(e.ts)) === k).sort((a, b) => new Date(a.ts) - new Date(b.ts));
       const m = MOOD[l[l.length - 1].mood];
-      s += `<circle cx="${x(i)}" cy="${y(p.v)}" r="6" fill="#fff" stroke="#ff5fa8" stroke-width="3"/><text x="${x(i)}" y="${y(p.v) - 12}" text-anchor="middle" font-size="15">${m.e}</text>`;
+      s += `<g class="trendpt" style="--i:${i}"><circle cx="${x(i)}" cy="${y(p.v)}" r="6" fill="#fff" stroke="#ff5fa8" stroke-width="3"/><text x="${x(i)}" y="${y(p.v) - 12}" text-anchor="middle" font-size="15">${m.e}</text></g>`;
     }
   });
   el.innerHTML = s + '</svg>';
@@ -253,14 +558,15 @@ function calendar() {
   let h = WD.map((w) => `<div class="h">${w[0]}</div>`).join('');
   const d = new Date(start);
   for (let i = 0; i < 42 && d <= end; i++, d.setDate(d.getDate() + 1)) {
+    const si = `--i:${i}`;
     const k = dayKey(d);
     const l = E().filter((e) => dayKey(new Date(e.ts)) === k).sort((a, b) => new Date(a.ts) - new Date(b.ts));
     const isT = k === dayKey(new Date());
     if (l.length) {
       const m = MOOD[l[l.length - 1].mood];
-      h += `<div class="c${isT ? ' today' : ''}" style="background:${m.c}33" title="${esc(k + ' · ' + m.n)}"><small>${d.getDate()}</small>${m.e}</div>`;
+      h += `<div class="c${isT ? ' today' : ''}" style="${si};background:${m.c}33" title="${esc(k + ' · ' + m.n)}"><small>${d.getDate()}</small>${m.e}</div>`;
     } else {
-      h += `<div class="c${isT ? ' today' : ''}"><small>${d.getDate()}</small><span style="opacity:.25">·</span></div>`;
+      h += `<div class="c${isT ? ' today' : ''}" style="${si}"><small>${d.getDate()}</small><span style="opacity:.25">·</span></div>`;
     }
   }
   $('#cal').innerHTML = h;
@@ -279,11 +585,11 @@ function renderDiary() {
     return;
   }
   const pend = store.pendingIds();
-  $('#diaryList').innerHTML = list.slice(0, state.diaryLimit).map((e) => {
+  $('#diaryList').innerHTML = list.slice(0, state.diaryLimit).map((e, idx) => {
     const m = MOOD[e.mood] || MOOD.meh;
     const v = vibe(e);
     const waiting = pend.has(e.id) ? '<span class="tag w">⏳ waiting to sync</span>' : '';
-    return `<div class="entry" style="border-left:8px solid ${m.c}"><div class="em">${m.e}</div><div class="mid"><div class="ttl">${esc(m.n)}</div><div class="when">${esc(fmtDate(e.ts))} · ${esc(fmtTime(e.ts))} · ⚡${e.energy} · 😵‍💫${e.stress} · 🦋${e.social}</div>${e.note ? `<div class="note">“${esc(e.note)}”</div>` : ''}<div class="meta">${waiting}${(e.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}${(e.care || []).map((t) => `<span class="tag g">${esc(t)}</span>`).join('')}</div></div><div class="side"><div class="score">${v}<small>vibe</small></div><button class="del" data-id="${esc(e.id)}" aria-label="Delete entry">🗑️</button></div></div>`;
+    return `<div class="entry" style="border-left:8px solid ${m.c};--i:${Math.min(idx, 12)}"><div class="em">${m.e}</div><div class="mid"><div class="ttl">${esc(m.n)}</div><div class="when">${esc(fmtDate(e.ts))} · ${esc(fmtTime(e.ts))} · ⚡${e.energy} · 😵‍💫${e.stress} · 🦋${e.social}</div>${e.note ? `<div class="note">“${esc(e.note)}”</div>` : ''}<div class="meta">${waiting}${(e.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('')}${(e.care || []).map((t) => `<span class="tag g">${esc(t)}</span>`).join('')}</div></div><div class="side"><div class="score">${v}<small>vibe</small></div><button class="del" data-id="${esc(e.id)}" aria-label="Delete entry">🗑️</button></div></div>`;
   }).join('');
 }
 
@@ -393,15 +699,18 @@ function importFile(file) {
 }
 
 /* ============================== tabs ============================== */
-function renderAll() { renderStats(); renderDiary(); refreshPreview(); }
+function renderAll() { renderStats(); renderDiary(); renderHero(); refreshPreview(); }
 
 function setTab(t, scroll = true) {
   if (!TABS.includes(t)) t = 'checkin';
   activeTab = t;
   $$('#nav button').forEach((b) => { b.classList.toggle('on', b.dataset.tab === t); b.setAttribute('aria-current', b.dataset.tab === t ? 'page' : 'false'); });
   $$('section.tab').forEach((s) => s.classList.toggle('on', s.id === 'tab-' + t));
+  syncView();
   if (t === 'dash') renderStats();
   if (t === 'report') refreshPreview();
+  if (t === 'diary') { const dl = $('#diaryList'); dl.classList.add('enter'); setTimeout(() => dl.classList.remove('enter'), 1200); }
+  $$('#tab-' + t + ' .card').forEach((c, i) => c.style.setProperty('--ci', String(Math.min(i, 8))));
   try { history.replaceState(null, '', '#' + t); } catch (e) { /* ignore */ }
   if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -505,6 +814,7 @@ function showApp() {
   $('#app').hidden = false;
   greet();
   renderAll();
+  initNote();
   updateChip();
   checkOfflineReady();
 }
@@ -720,6 +1030,13 @@ function wire() {
     selMood = b.dataset.k;
     $$('.mood').forEach((x) => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-pressed', String(on)); });
     $('#moodmsg').textContent = pick(MOOD[selMood].m);
+    swapIn($('#moodmsg'));
+    $('#ambient').style.setProperty('--mc', MOOD[selMood].c);
+    $('#wizard').style.setProperty('--mc', MOOD[selMood].c);
+    const fm = $('#flowMood');
+    fm.textContent = MOOD[selMood].e;
+    fm.classList.remove('pop'); void fm.offsetWidth; fm.classList.add('pop');
+    syncNav();
     buzz(12);
   });
   [['#tags', selTags], ['#care', selCare]].forEach(([id, set]) => $(id).addEventListener('click', (ev) => {
@@ -728,10 +1045,41 @@ function wire() {
     const v = b.dataset.v;
     if (set.has(v)) { set.delete(v); b.classList.remove('on'); } else { set.add(v); b.classList.add('on'); }
     b.setAttribute('aria-pressed', String(set.has(v)));
+    bounce(b, 0.88);
+    if (set === selCare) {
+      const n = selCare.size;
+      $('#carePop').textContent = n === 0 ? '' : n >= CARE.length ? 'full royal treatment! 👑✨' : n >= 5 ? `${n} of ${CARE.length}. a total glow-up 💅` : n >= 3 ? `${n} of ${CARE.length}. look at you go 🌸` : `${n} of ${CARE.length}. every bit counts 💗`;
+      swapIn($('#carePop'));
+    }
+    syncNav();
     buzz(8);
   }));
-  ['energy', 'stress', 'social'].forEach((id) => $('#' + id).addEventListener('input', (e) => { $('#v-' + id).textContent = e.target.value; }));
-  $('#note').addEventListener('input', (e) => { $('#nc').textContent = e.target.value.length; });
+  ['energy', 'stress', 'social'].forEach((id) => $('#' + id).addEventListener('input', () => {
+    syncSliders();
+    const v = $('#v-' + id);
+    v.classList.add('bump'); clearTimeout(v.t); v.t = setTimeout(() => v.classList.remove('bump'), 160);
+    buzz(4);
+  }));
+  $('#startBtn').addEventListener('click', startFlow);
+  $('#nextBtn').addEventListener('click', nextStep);
+  $('#backBtn').addEventListener('click', () => { buzz(8); if (step === 1) closeFlow(); else goStep(step - 1); });
+  $('#flowClose').addEventListener('click', closeFlow);
+  $('#summary').addEventListener('click', (e) => { const b = e.target.closest('[data-go]'); if (b) { buzz(8); goStep(+b.dataset.go); } });
+  $('#whenBtn').addEventListener('click', () => {
+    const box = $('#whenBox');
+    box.hidden = !box.hidden;
+    $('#whenBtn').textContent = box.hidden ? 'change' : 'done';
+    $('#whenBtn').setAttribute('aria-expanded', String(!box.hidden));
+    if (!box.hidden) { if (!whenTouched) $('#when').value = localInput(new Date()); try { $('#when').focus(); } catch (e) { /* ignore */ } }
+  });
+  $('#when').addEventListener('input', () => {
+    const d = new Date($('#when').value);
+    if (isNaN(d)) return;
+    whenTouched = true;
+    $('#whenTxt').textContent = '🕒 ' + d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  });
+  $('#sealBtn').addEventListener('click', () => openLetter(false));
+  $('#note').addEventListener('input', (e) => { $('#nc').textContent = e.target.value.length; syncNav(); });
   $('#save').addEventListener('click', saveEntry);
 
   $('#range').addEventListener('change', renderStats);
@@ -787,6 +1135,7 @@ function wire() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     tryApplyUpdate();
+    if (!$('#app').hidden) { greet(); renderHero(); initNote(); } // the date (and the note) roll over at midnight
     if (Date.now() - lastVis > 15000) { lastVis = Date.now(); syncNow(); }
   });
   setInterval(() => { if (document.visibilityState === 'visible') syncNow(); }, 5 * 60 * 1000);
@@ -798,7 +1147,6 @@ async function boot() {
   applyTheme(savedTheme());
   buildFloaties();
   buildForm();
-  qotd();
   wire();
   setupInstall();
   setupServiceWorker();

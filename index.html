@@ -14,6 +14,8 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 </head>
 <body data-theme="pink">
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="ambient" id="ambient" aria-hidden="true"></div>
 <div class="floaties" id="floaties" aria-hidden="true"></div>
 
 <div class="loading" id="loading"><div class="crown">👑</div><div>loading your royal diary…</div></div>
@@ -57,10 +59,12 @@
 
     <div class="banner" id="localBanner" hidden>💾 Local mode — no Supabase keys found, so moods are saved on this device only.</div>
 
-    <header>
-      <div class="crown">👑</div>
-      <h1>SCS External Princess<br>Mood Checker</h1>
-      <div class="sub">~ how's tinaaaaa feeling today? ~</div>
+    <header id="mainHeader">
+      <div class="crownwrap"><span class="ring r1"></span><span class="ring r2"></span><div class="crown">👑</div></div>
+      <div class="htext">
+        <h1>SCS External Princess <br>Mood Checker</h1>
+        <div class="sub" id="heroSub">~ how's tinaaaaa feeling today? ~</div>
+      </div>
     </header>
 
     <nav id="nav" aria-label="Sections">
@@ -70,55 +74,149 @@
       <button data-tab="report"><span class="i">👑</span><span class="l">Reports</span></button>
     </nav>
 
-    <!-- CHECK-IN -->
+    <!-- CHECK-IN: landing + 6 small steps -->
     <section class="tab on" id="tab-checkin">
-      <div class="greeting" id="greeting">hello, tinaaa ✨</div>
-      <div class="quote" id="qotd"></div>
+      <div class="wizard" id="wizard" data-step="0">
 
-      <div class="grid2">
-        <div>
-          <div class="card">
-            <h2>🌈 How are you feeling?</h2>
-            <p class="hint">tap the mood that matches your vibe right now</p>
-            <div class="moods" id="moods"></div>
-            <div class="moodmsg" id="moodmsg">Pick a mood, bebs 💕</div>
+        <div class="flowbar" id="flowbar" hidden>
+          <button type="button" class="iconbtn" id="flowClose" aria-label="Leave check-in (your answers are kept)">✕</button>
+          <div class="prog" id="prog" role="progressbar" aria-valuemin="1" aria-valuemax="6" aria-valuenow="1" aria-label="Check-in progress"></div>
+          <div class="flowmood" id="flowMood" aria-hidden="true">👑</div>
+        </div>
+        <div class="steplabel" id="stepLabel" aria-live="polite" hidden></div>
+
+        <div class="stage" id="stage">
+
+          <!-- 0 · welcome -->
+          <div class="step in-fwd" data-step="0">
+            <div class="hero">
+              <div class="greeting rise" id="greeting" style="--i:0">hello, tinaaa ✨</div>
+              <div class="herodate rise" id="heroDate" style="--i:1"></div>
+              <div class="herochips rise" id="heroChips" style="--i:2"></div>
+            </div>
+
+            <button type="button" class="cta rise" id="startBtn" style="--i:3">
+              <span class="ctashine" aria-hidden="true"></span>
+              <span class="ctamain" id="startTxt">Start my check-in ✨</span>
+              <span class="ctasub" id="startSub">6 tiny steps · about a minute</span>
+            </button>
+
+            <div class="weekcard rise" style="--i:4">
+              <div class="weekttl">your week at a glance</div>
+              <div class="weekstrip" id="weekStrip"></div>
+            </div>
+
+            <!-- the sealed note of the day -->
+            <div class="letter rise" id="letter" data-state="sealed" style="--i:5">
+              <button type="button" class="sealed" id="sealBtn" aria-expanded="false" aria-controls="notePaper">
+                <span class="flap" aria-hidden="true"></span>
+                <span class="seal" aria-hidden="true"><i class="half l">👑</i><i class="half r">👑</i></span>
+                <span class="sealtxt">
+                  <span class="sealttl">a note for today</span>
+                  <span class="sealhint">tap the seal to open it</span>
+                </span>
+              </button>
+              <div class="paperwrap" id="notePaper" inert>
+                <div class="paper" id="paper" tabindex="-1">
+                  <div class="notecard" id="noteCard">
+                    <p class="notetext" id="noteText"></p>
+                    <p class="noteby" id="noteBy"></p>
+                    <p class="notefoot">a new note arrives tomorrow 🌙</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 1 · mood -->
+          <div class="step" data-step="1" hidden>
+            <div class="stephead rise" style="--i:0">
+              <h2 class="stepttl" tabindex="-1">🌈 How are you feeling?</h2>
+              <p class="hint">tap the one that matches your vibe</p>
+            </div>
+            <div class="moods" id="moods" role="group" aria-label="Mood"></div>
+            <div class="moodmsg rise" id="moodmsg" style="--i:11">Pick a mood, bebs 💕</div>
+          </div>
+
+          <!-- 2 · meters -->
+          <div class="step" data-step="2" hidden>
+            <div class="stephead rise" style="--i:0">
+              <h2 class="stepttl" tabindex="-1">🎚️ Royal Meters</h2>
+              <p class="hint">slide to match your levels</p>
+            </div>
+            <div class="meter rise" style="--i:1">
+              <div class="meterface" id="face-energy" aria-hidden="true">🙂</div>
+              <div class="slider"><div class="top"><label for="energy">⚡ Energy</label><span class="val" id="v-energy">6</span></div><input type="range" id="energy" min="0" max="10" value="6"><div class="ends"><span>🪫 drained</span><span>🔋 fully charged</span></div></div>
+            </div>
+            <div class="meter rise" style="--i:2">
+              <div class="meterface" id="face-stress" aria-hidden="true">😬</div>
+              <div class="slider"><div class="top"><label for="stress">😵‍💫 Stress</label><span class="val" id="v-stress">4</span></div><input type="range" id="stress" min="0" max="10" value="4"><div class="ends"><span>🧘‍♀️ zen</span><span>🌋 volcano</span></div></div>
+            </div>
+            <div class="meter rise" style="--i:3">
+              <div class="meterface" id="face-social" aria-hidden="true">😊</div>
+              <div class="slider"><div class="top"><label for="social">🦋 Social Battery</label><span class="val" id="v-social">6</span></div><input type="range" id="social" min="0" max="10" value="6"><div class="ends"><span>🛌 hermit mode</span><span>🎤 main character</span></div></div>
+            </div>
+            <div class="vibelive rise" style="--i:4" aria-live="polite">
+              <svg viewBox="0 0 80 80" width="62" height="62" aria-hidden="true"><circle cx="40" cy="40" r="34" fill="none" stroke="#fff" stroke-width="9"/><circle id="liveArc" cx="40" cy="40" r="34" fill="none" stroke="url(#lg)" stroke-width="9" stroke-linecap="round" stroke-dasharray="213.6" stroke-dashoffset="213.6" transform="rotate(-90 40 40)"/><defs><linearGradient id="lg" x1="0" x2="1"><stop offset="0" stop-color="#ff7cbc"/><stop offset="1" stop-color="#b98cff"/></linearGradient></defs></svg>
+              <div class="vl"><b id="liveVibe">0</b><span id="liveLevel">your live royal vibe</span></div>
+            </div>
+          </div>
+
+          <!-- 3 · factors -->
+          <div class="step" data-step="3" hidden>
+            <div class="stephead rise" style="--i:0">
+              <h2 class="stepttl" tabindex="-1">🎀 What's affecting your mood?</h2>
+              <p class="hint">pick all that apply · or skip</p>
+            </div>
+            <div class="chips" id="tags"></div>
+          </div>
+
+          <!-- 4 · self-care -->
+          <div class="step" data-step="4" hidden>
+            <div class="stephead rise" style="--i:0">
+              <h2 class="stepttl" tabindex="-1">🧴 Princess self-care check</h2>
+              <p class="hint">what did you do for yourself today?</p>
+            </div>
+            <div class="chips" id="care"></div>
+            <div class="carepop" id="carePop" aria-live="polite"></div>
+          </div>
+
+          <!-- 5 · diary -->
+          <div class="step" data-step="5" hidden>
+            <div class="stephead rise" style="--i:0">
+              <h2 class="stepttl" tabindex="-1">📔 Dear Diary…</h2>
+              <p class="hint">spill the tea (optional)</p>
+            </div>
+            <div class="paperpad rise" style="--i:1">
+              <textarea id="note" maxlength="400" placeholder="Today was… 💭"></textarea>
+              <div class="count"><span id="nc">0</span>/400</div>
+            </div>
+            <div class="whenrow rise" style="--i:2">
+              <span class="whentxt" id="whenTxt">🕒 Right now</span>
+              <button type="button" class="link whenbtn" id="whenBtn" aria-expanded="false" aria-controls="whenBox">change</button>
+            </div>
+            <div id="whenBox" hidden>
+              <label class="lbl" for="when">When was this?</label>
+              <input type="datetime-local" id="when" style="margin-bottom:12px">
+            </div>
+          </div>
+
+          <!-- 6 · review -->
+          <div class="step" data-step="6" hidden>
+            <div class="stephead rise" style="--i:0">
+              <h2 class="stepttl" tabindex="-1">👑 Your royal entry</h2>
+              <p class="hint">look good? then seal it with a save 💖</p>
+            </div>
+            <div class="summary" id="summary"></div>
           </div>
         </div>
 
-        <div>
-          <div class="card">
-            <h2>🎚️ Royal Meters</h2>
-            <p class="hint">slide to match your levels</p>
-            <div class="slider"><div class="top"><label for="energy">⚡ Energy</label><span class="val" id="v-energy">6</span></div><input type="range" id="energy" min="0" max="10" value="6"><div class="ends"><span>🪫 drained</span><span>🔋 fully charged</span></div></div>
-            <div class="slider"><div class="top"><label for="stress">😵‍💫 Stress</label><span class="val" id="v-stress">4</span></div><input type="range" id="stress" min="0" max="10" value="4"><div class="ends"><span>🧘‍♀️ zen</span><span>🌋 volcano</span></div></div>
-            <div class="slider"><div class="top"><label for="social">🦋 Social Battery</label><span class="val" id="v-social">6</span></div><input type="range" id="social" min="0" max="10" value="6"><div class="ends"><span>🛌 hermit mode</span><span>🎤 main character</span></div></div>
-          </div>
+        <div class="savebar flownav" id="flownav" hidden>
+          <button type="button" class="btn alt" id="backBtn">← Back</button>
+          <button type="button" class="btn idle" id="nextBtn">Next →</button>
+          <button type="button" class="btn" id="save" hidden>Save my mood ✨</button>
         </div>
       </div>
-
-      <div class="grid2">
-        <div class="card">
-          <h2>🎀 What's affecting your mood?</h2>
-          <p class="hint">pick all that apply</p>
-          <div class="chips" id="tags"></div>
-        </div>
-        <div class="card">
-          <h2>🧴 Princess self-care check</h2>
-          <p class="hint">what did you do for yourself today?</p>
-          <div class="chips" id="care"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>📔 Dear Diary…</h2>
-        <p class="hint">spill the tea (optional)</p>
-        <label class="lbl" for="when">🕒 When was this?</label>
-        <input type="datetime-local" id="when" style="margin-bottom:12px">
-        <textarea id="note" maxlength="400" placeholder="Today was… 💭"></textarea>
-        <div class="count"><span id="nc">0</span>/400</div>
-      </div>
-
-      <div class="savebar"><button class="btn big" id="save">✨ Save My Royal Mood ✨</button></div>
     </section>
 
     <!-- DASHBOARD -->

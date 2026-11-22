@@ -2,7 +2,9 @@
 
 A girly, phone-first mood checker and tracker for the SCS External Princess. Vite + vanilla JS, **Supabase** for login and database, ready to deploy on **Vercel**.
 
-- 💖 Check-in: 10 moods, energy / stress / social-battery sliders, mood factors, self-care checklist, diary note
+- 💌 A sealed **note of the day** on the check-in page: tap the wax seal to open it. A new one every day, imported from a public quotes API (`NOTE_API` in `src/dailynote.js`), kept on the phone for the day, with a hand-written fallback bank when offline
+- 💖 Check-in as a **6-step guided flow** (Mood → Royal Meters → Factors → Self-care → Diary → **Review & Save**), one small screen at a time, with a progress bar, slide transitions, reacting emojis and a live vibe score. Optional steps can be skipped; every part of the Review page has an *edit* button; leaving with ✕ keeps her draft
+- 🏠 A welcome screen with a big start button, a 7-day mood strip and the sealed note
 - 📊 Dashboard: streak, today's mood meter, 14-day vibe trend, mood mix, best weekdays, 5-week calendar, insights
 - 📖 Royal Diary with search, mood filter and delete
 - 👑 Reports: download as HTML, CSV, print/save as PDF, or share from the phone's share sheet
@@ -83,6 +85,7 @@ src/main.js           UI + app logic
 src/store.js          offline-first store: phone cache + upload queue + Supabase auth (local-mode fallback)
 src/config.js         moods, factors, self-care, copy
   (fonts are bundled via @fontsource, no Google Fonts needed, so it looks the same offline)
+src/dailynote.js      the daily note: import, daily cache, offline fallback
 src/analytics.js      vibe score, stats, insights
 src/report.js         HTML report + CSV
 src/style.css         all styles (phone-first)
